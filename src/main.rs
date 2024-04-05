@@ -340,7 +340,7 @@ fn series(out: &mut Output, repo: &Repository) -> Result<()> {
     } else {
         None
     };
-    refs.extend(shead_target.clone().into_iter());
+    refs.extend(shead_target.clone());
     refs.sort();
     refs.dedup();
 
@@ -379,7 +379,7 @@ fn start(repo: &Repository, m: &ArgMatches) -> Result<()> {
     let prefixed_name = &[SERIES_PREFIX, name].concat();
     repo.reference_symbolic(
         SHEAD_REF,
-        &prefixed_name,
+        prefixed_name,
         true,
         &format!("git series start {}", name),
     )?;
@@ -394,7 +394,7 @@ fn start(repo: &Repository, m: &ArgMatches) -> Result<()> {
         true,
         &format!("checkout: moving from {} to {} (git series start {})", head_id, head_id, name),
     )?;
-    println!("HEAD is now detached at {}", commit_summarize(&repo, head_id)?);
+    println!("HEAD is now detached at {}", commit_summarize(repo, head_id)?);
     Ok(())
 }
 
@@ -465,12 +465,12 @@ fn checkout(repo: &Repository, m: &ArgMatches) -> Result<()> {
     let head = repo.head()?;
     let head_commit = head.peel_to_commit()?;
     let head_id = head_commit.as_object().id();
-    println!("Previous HEAD position was {}", commit_summarize(&repo, head_id)?);
+    println!("Previous HEAD position was {}", commit_summarize(repo, head_id)?);
 
     let prefixed_name = &[SERIES_PREFIX, name].concat();
     repo.reference_symbolic(
         SHEAD_REF,
-        &prefixed_name,
+        prefixed_name,
         true,
         &format!("git series checkout {}", name),
     )?;
@@ -483,7 +483,7 @@ fn checkout(repo: &Repository, m: &ArgMatches) -> Result<()> {
         true,
         &format!("checkout: moving from {} to {} (git series checkout {})", head_id, new_head_id, name),
     )?;
-    println!("HEAD is now detached at {}", commit_summarize(&repo, new_head_id)?);
+    println!("HEAD is now detached at {}", commit_summarize(repo, new_head_id)?);
 
     Ok(())
 }
@@ -532,7 +532,7 @@ fn base(repo: &Repository, m: &ArgMatches) -> Result<()> {
     }
 
     if !current_base_id.is_zero() {
-        println!("Previous base was {}", commit_summarize(&repo, current_base_id)?);
+        println!("Previous base was {}", commit_summarize(repo, current_base_id)?);
     }
 
     if new_base_id.is_zero() {
@@ -542,7 +542,7 @@ fn base(repo: &Repository, m: &ArgMatches) -> Result<()> {
     } else {
         internals.working.insert("base", new_base_id, GIT_FILEMODE_COMMIT as i32)?;
         internals.write(repo)?;
-        println!("Set patch series base to {}", commit_summarize(&repo, new_base_id)?);
+        println!("Set patch series base to {}", commit_summarize(repo, new_base_id)?);
     }
 
     Ok(())
@@ -567,14 +567,15 @@ fn delete(repo: &Repository, m: &ArgMatches) -> Result<()> {
             ).into());
         }
     }
-    if Internals::delete(repo, name)? == false {
+    let anything_to_delete = Internals::delete(repo, name)?;
+    if !anything_to_delete {
         return Err(format!("Nothing to delete: series \"{}\" does not exist.", name).into());
     }
     Ok(())
 }
 
 fn do_diff(out: &mut Output, repo: &Repository) -> Result<()> {
-    let internals = Internals::read(&repo)?;
+    let internals = Internals::read(repo)?;
     let config = repo.config()?.snapshot()?;
     out.auto_pager(&config, "diff", true)?;
     let diffcolors = DiffColors::new(out, &config)?;
@@ -663,7 +664,7 @@ fn cmd_maybe_shell<S: AsRef<OsStr>>(program: S, args: bool) -> Command {
 }
 
 fn run_editor<S: AsRef<OsStr>>(config: &Config, filename: S) -> Result<()> {
-    let editor = get_editor(&config)?;
+    let editor = get_editor(config)?;
     let editor_status = cmd_maybe_shell(editor, true).arg(&filename).status()?;
     if !editor_status.success() {
         return Err(format!("Editor exited with status {}", editor_status).into());
@@ -776,17 +777,17 @@ fn get_signature(config: &Config, which: &str) -> Result<git2::Signature<'static
     let which_lc = which.to_lowercase();
     let name = env::var(&name_var)
         .or_else(|_| config.get_string("user.name"))
-        .or_else(|_| Err(format!(
+        .map_err(|_| format!(
             "Could not determine {} name: checked ${} and user.name in git config",
             which_lc, name_var,
-        )))?;
+        ))?;
     let email = env::var(&email_var)
         .or_else(|_| config.get_string("user.email"))
         .or_else(|_| env::var("EMAIL"))
-        .or_else(|_| Err(format!(
+        .map_err(|_| format!(
             "Could not determine {} email: checked ${}, user.email in git config, and $EMAIL",
             which_lc, email_var,
-        )))?;
+        ))?;
     Ok(git2::Signature::now(&name, &email)?)
 }
 
@@ -834,7 +835,7 @@ fn commit_status(
         diff.foreach(&mut |delta, _| {
             if !changes {
                 changes = true;
-                status.push(color_header.paint(format!("{}\n", heading.to_string())));
+                status.push(color_header.paint(format!("{}\n", heading)));
                 if show_hints {
                     for hint in hints {
                         status.push(color_header.paint(format!("  ({})\n", hint)));
@@ -950,8 +951,8 @@ fn commit_status(
     // Check that the base is still an ancestor of the series
     if let Some(base) = tree.get_name("base") {
         if base.id() != series_id && !repo.graph_descendant_of(series_id, base.id())? {
-            let (base_short_id, base_summary) = commit_summarize_components(&repo, base.id())?;
-            let (series_short_id, series_summary) = commit_summarize_components(&repo, series_id)?;
+            let (base_short_id, base_summary) = commit_summarize_components(repo, base.id())?;
+            let (series_short_id, series_summary) = commit_summarize_components(repo, series_id)?;
             return Err(format!(
                 concat!(
                     "Cannot commit: base {} is not an ancestor of patch series {}\n",
@@ -1021,7 +1022,7 @@ fn commit_status(
         internals.write(repo)?;
     }
 
-    let (new_commit_short_id, new_commit_summary) = commit_summarize_components(&repo, new_commit_oid)?;
+    let (new_commit_short_id, new_commit_summary) = commit_summarize_components(repo, new_commit_oid)?;
     writeln!(out, "[{} {}] {}", series_name, new_commit_short_id, new_commit_summary)?;
 
     Ok(())
@@ -1088,10 +1089,10 @@ fn cp_mv(repo: &Repository, m: &ArgMatches, mv: bool) -> Result<()> {
         None => (true, shead_target.ok_or("No current series")?),
     };
 
-    if Internals::exists(&repo, dest)? {
+    if Internals::exists(repo, dest)? {
         return Err(format!("The destination series \"{}\" already exists", dest).into());
     }
-    if !Internals::copy(&repo, &source, &dest)? {
+    if !Internals::copy(repo, &source, dest)? {
         return Err(format!("The source series \"{}\" does not exist", source).into());
     }
 
@@ -1100,12 +1101,12 @@ fn cp_mv(repo: &Repository, m: &ArgMatches, mv: bool) -> Result<()> {
             let prefixed_dest = &[SERIES_PREFIX, dest].concat();
             repo.reference_symbolic(
                 SHEAD_REF,
-                &prefixed_dest,
+                prefixed_dest,
                 true,
                 &format!("git series mv {} {}", source, dest),
             )?;
         }
-        Internals::delete(&repo, &source)?;
+        Internals::delete(repo, &source)?;
     }
 
     Ok(())
@@ -1159,10 +1160,8 @@ fn sanitize_summary(summary: &str) -> String {
             if !(prev_dot && c == '.') {
                 s.push(c);
             }
-        } else {
-            if !s.is_empty() {
-                need_space = true;
-            }
+        } else if !s.is_empty() {
+            need_space = true;
         }
         prev_dot = c == '.';
     }
@@ -1224,14 +1223,14 @@ impl DiffColors {
     }
 
     fn new(out: &Output, config: &Config) -> Result<Self> {
-        let old = out.get_color(&config, "diff", "old", "red")?;
-        let new = out.get_color(&config, "diff", "new", "green")?;
+        let old = out.get_color(config, "diff", "old", "red")?;
+        let new = out.get_color(config, "diff", "new", "green")?;
         Ok(DiffColors {
-            commit: out.get_color(&config, "diff", "commit", "yellow")?,
-            meta: out.get_color(&config, "diff", "meta", "bold")?,
-            frag: out.get_color(&config, "diff", "frag", "cyan")?,
-            func: out.get_color(&config, "diff", "func", "normal")?,
-            context: out.get_color(&config, "diff", "context", "normal")?,
+            commit: out.get_color(config, "diff", "commit", "yellow")?,
+            meta: out.get_color(config, "diff", "meta", "bold")?,
+            frag: out.get_color(config, "diff", "frag", "cyan")?,
+            func: out.get_color(config, "diff", "func", "normal")?,
+            context: out.get_color(config, "diff", "context", "normal")?,
             old,
             new,
             series_old: old.reverse(),
@@ -1305,7 +1304,7 @@ fn write_diff<W: IoWrite>(
                     .nth(1)
                     .unwrap_or((0, &b'\n'))
                 {
-                    (_, &c) if c == b'\n' => v.push(style.paint(&line[..line.len() - 1])),
+                    (_, &b'\n') => v.push(style.paint(&line[..line.len() - 1])),
                     (pos, _) => {
                         v.push(style.paint(&line[..pos - 1]));
                         v.push(normal.paint(" ".as_bytes()));
@@ -1362,7 +1361,7 @@ fn write_commit_range_diff<W: IoWrite>(
         }
     }
     let ncommon = commits1.iter().zip(commits2.iter())
-        .take_while(|&(ref c1, ref c2)| c1.id() == c2.id())
+        .take_while(|(c1, c2)| c1.id() == c2.id())
         .count();
     drop(commits1.drain(..ncommon));
     drop(commits2.drain(..ncommon));
@@ -1418,7 +1417,11 @@ fn write_commit_range_diff<W: IoWrite>(
     let result = munkres::solve_assignment(&mut weight_matrix)?;
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-    enum CommitState { Unhandled, Handled, Deleted };
+    enum CommitState {
+        Unhandled,
+        Handled,
+        Deleted,
+    }
     let mut commits2_from1: Vec<_> = std::iter::repeat(None).take(ncommits2).collect();
     let mut commits1_state: Vec<_> = std::iter::repeat(CommitState::Unhandled).take(ncommits1).collect();
     let mut commit_pairs = Vec::with_capacity(n);
@@ -1470,7 +1473,7 @@ fn write_commit_range_diff<W: IoWrite>(
     let commits1_summaries: Vec<_> = commits1.iter_mut().map(commit_obj_summarize_components).collect::<Result<_>>()?;
     let commits2_summaries: Vec<_> = commits2.iter_mut().map(commit_obj_summarize_components).collect::<Result<_>>()?;
     let idwidth = commits1_summaries.iter().chain(commits2_summaries.iter())
-        .map(|&(ref short_id, _)| short_id.len())
+        .map(|(short_id, _)| short_id.len())
         .max().unwrap();
     for commit_pair in commit_pairs {
         match commit_pair {
@@ -1637,7 +1640,7 @@ fn format(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
     };
     let subject_patch = version.map_or(
         subject_prefix.to_string(),
-        |n| format!("{}{}v{}", subject_prefix, ensure_space(&subject_prefix), n),
+        |n| format!("{}{}v{}", subject_prefix, ensure_space(subject_prefix), n),
     );
     let file_prefix = version.map_or("".to_string(), |n| format!("v{}-", n));
 
@@ -1718,7 +1721,7 @@ fn format(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
         let commit_author = commit.author();
         let commit_author_name = commit_author.name().unwrap();
         let commit_author_email = commit_author.email().unwrap();
-        let summary_sanitized = sanitize_summary(&subject);
+        let summary_sanitized = sanitize_summary(subject);
         let this_message_id = format!("<{}.{}>", commit_id, message_id_suffix);
         let parent = commit.parent(0)?;
         let diff = repo.diff_tree_to_tree(
@@ -1768,7 +1771,7 @@ fn format(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
             writeln!(out, "From: {} <{}>\n", commit_author_name, commit_author_email)?;
         }
         if !body.is_empty() {
-            write!(out, "{}{}", body, ensure_nl(&body))?;
+            write!(out, "{}{}", body, ensure_nl(body))?;
         }
         writeln!(out, "---")?;
         writeln!(out, "{}", stats)?;
@@ -1930,9 +1933,9 @@ fn rebase(repo: &Repository, m: &ArgMatches) -> Result<()> {
         return Ok(());
     }
 
-    let (base_short, _) = commit_summarize_components(&repo, base.id())?;
-    let (newbase_short, _) = commit_summarize_components(&repo, newbase)?;
-    let (series_short, _) = commit_summarize_components(&repo, series.id())?;
+    let (base_short, _) = commit_summarize_components(repo, base.id())?;
+    let (newbase_short, _) = commit_summarize_components(repo, newbase)?;
+    let (series_short, _) = commit_summarize_components(repo, series.id())?;
 
     let newbase_obj = repo.find_commit(newbase)?.into_object();
 
@@ -2236,23 +2239,23 @@ fn main() {
         let repo = Repository::discover(".")?;
         match m.subcommand() {
             ("", _) => series(&mut out, &repo),
-            ("add", Some(ref sm)) => add(&repo, &sm),
-            ("base", Some(ref sm)) => base(&repo, &sm),
-            ("checkout", Some(ref sm)) => checkout(&repo, &sm),
-            ("commit", Some(ref sm)) => commit_status(&mut out, &repo, &sm, false),
-            ("cover", Some(ref sm)) => cover(&repo, &sm),
-            ("cp", Some(ref sm)) => cp_mv(&repo, &sm, false),
-            ("delete", Some(ref sm)) => delete(&repo, &sm),
+            ("add", Some(sm)) => add(&repo, sm),
+            ("base", Some(sm)) => base(&repo, sm),
+            ("checkout", Some(sm)) => checkout(&repo, sm),
+            ("commit", Some(sm)) => commit_status(&mut out, &repo, sm, false),
+            ("cover", Some(sm)) => cover(&repo, sm),
+            ("cp", Some(sm)) => cp_mv(&repo, sm, false),
+            ("delete", Some(sm)) => delete(&repo, sm),
             ("detach", _) => detach(&repo),
             ("diff", _) => do_diff(&mut out, &repo),
-            ("format", Some(ref sm)) => format(&mut out, &repo, &sm),
-            ("log", Some(ref sm)) => log(&mut out, &repo, &sm),
-            ("mv", Some(ref sm)) => cp_mv(&repo, &sm, true),
-            ("rebase", Some(ref sm)) => rebase(&repo, &sm),
-            ("req", Some(ref sm)) => req(&mut out, &repo, &sm),
-            ("start", Some(ref sm)) => start(&repo, &sm),
-            ("status", Some(ref sm)) => commit_status(&mut out, &repo, &sm, true),
-            ("unadd", Some(ref sm)) => unadd(&repo, &sm),
+            ("format", Some(sm)) => format(&mut out, &repo, sm),
+            ("log", Some(sm)) => log(&mut out, &repo, sm),
+            ("mv", Some(sm)) => cp_mv(&repo, sm, true),
+            ("rebase", Some(sm)) => rebase(&repo, sm),
+            ("req", Some(sm)) => req(&mut out, &repo, sm),
+            ("start", Some(sm)) => start(&repo, sm),
+            ("status", Some(sm)) => commit_status(&mut out, &repo, sm, true),
+            ("unadd", Some(sm)) => unadd(&repo, sm),
             _ => unreachable!(),
         }
     }();

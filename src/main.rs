@@ -2160,78 +2160,80 @@ fn req(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
 }
 
 fn main() {
-    let m = App::new("git-series")
-            .bin_name("git series")
-            .about("Track patch series in git")
-            .author("Josh Triplett <josh@joshtriplett.org>")
-            .version(clap::crate_version!())
-            .global_setting(AppSettings::ColoredHelp)
-            .global_setting(AppSettings::UnifiedHelpMessage)
-            .global_setting(AppSettings::VersionlessSubcommands)
-            .subcommands(vec![
-                SubCommand::with_name("add")
-                    .about("Add changes to the index for the next series commit")
-                    .arg_from_usage("<change>... 'Changes to add (\"series\", \"base\", \"cover\")'"),
-                SubCommand::with_name("base")
-                    .about("Get or set the base commit for the patch series")
-                    .arg(Arg::with_name("base").help("Base commit").conflicts_with("delete"))
-                    .arg_from_usage("-d, --delete 'Clear patch series base'"),
-                SubCommand::with_name("checkout")
-                    .about("Resume work on a patch series; check out the current version")
-                    .arg_from_usage("<name> 'Patch series to check out'"),
-                SubCommand::with_name("commit")
-                    .about("Record changes to the patch series")
-                    .arg_from_usage("-a, --all 'Commit all changes'")
-                    .arg_from_usage("-m [msg] 'Commit message'")
-                    .arg_from_usage("-v, --verbose 'Show diff when preparing commit message'"),
-                SubCommand::with_name("cover")
-                    .about("Create or edit the cover letter for the patch series")
-                    .arg_from_usage("-d, --delete 'Delete cover letter'"),
-                SubCommand::with_name("cp")
-                    .about("Copy a patch series")
-                    .arg(Arg::with_name("source_dest").required(true).min_values(1).max_values(2).help("source (default: current series) and destination (required)")),
-                SubCommand::with_name("delete")
-                    .about("Delete a patch series")
-                    .arg_from_usage("<name> 'Patch series to delete'"),
-                SubCommand::with_name("detach")
-                    .about("Stop working on any patch series"),
-                SubCommand::with_name("diff")
-                    .about("Show changes in the patch series"),
-                SubCommand::with_name("format")
-                    .about("Prepare patch series for email")
-                    .arg_from_usage("--in-reply-to [Message-Id] 'Make the first mail a reply to the specified Message-Id'")
-                    .arg_from_usage("--no-from 'Don't include in-body \"From:\" headers when formatting patches authored by others'")
-                    .arg_from_usage("-v, --reroll-count=[N] 'Mark the patch series as PATCH vN'")
-                    .arg(Arg::from_usage("--rfc 'Use [RFC PATCH] instead of the standard [PATCH] prefix'").conflicts_with("subject-prefix"))
-                    .arg_from_usage("--stdout 'Write patches to stdout rather than files'")
-                    .arg_from_usage("--subject-prefix [prefix] 'Use [prefix] instead of the standard [PATCH] prefix'"),
-                SubCommand::with_name("log")
-                    .about("Show the history of the patch series")
-                    .arg_from_usage("-p, --patch 'Include a patch for each change committed to the series'"),
-                SubCommand::with_name("mv")
-                    .about("Move (rename) a patch series")
-                    .visible_alias("rename")
-                    .arg(Arg::with_name("source_dest").required(true).min_values(1).max_values(2).help("source (default: current series) and destination (required)")),
-                SubCommand::with_name("rebase")
-                    .about("Rebase the patch series")
-                    .arg_from_usage("[onto] 'Commit to rebase onto'")
-                    .arg_from_usage("-i, --interactive 'Interactively edit the list of commits'")
-                    .group(ArgGroup::with_name("action").args(&["onto", "interactive"]).multiple(true).required(true)),
-                SubCommand::with_name("req")
-                    .about("Generate a mail requesting a pull of the patch series")
-                    .visible_aliases(&["pull-request", "request-pull"])
-                    .arg_from_usage("-p, --patch 'Include patch in the mail'")
-                    .arg_from_usage("<url> 'Repository URL to request pull of'")
-                    .arg_from_usage("<tag> 'Tag or branch name to request pull of'"),
-                SubCommand::with_name("status")
-                    .about("Show the status of the patch series"),
-                SubCommand::with_name("start")
-                    .about("Start a new patch series")
-                    .arg_from_usage("<name> 'Patch series name'"),
-                SubCommand::with_name("unadd")
-                    .about("Undo \"git series add\", removing changes from the next series commit")
-                    .arg_from_usage("<change>... 'Changes to remove (\"series\", \"base\", \"cover\")'"),
-            ]).get_matches();
+    let app = App::new("git-series")
+        .bin_name("git series")
+        .about("Track patch series in git")
+        .author("Josh Triplett <josh@joshtriplett.org>")
+        .version(clap::crate_version!())
+        .global_setting(AppSettings::ColoredHelp)
+        .global_setting(AppSettings::UnifiedHelpMessage)
+        .global_setting(AppSettings::VersionlessSubcommands)
+        .subcommands(vec![
+            SubCommand::with_name("add")
+                .about("Add changes to the index for the next series commit")
+                .arg_from_usage("<change>... 'Changes to add (\"series\", \"base\", \"cover\")'"),
+            SubCommand::with_name("base")
+                .about("Get or set the base commit for the patch series")
+                .arg(Arg::with_name("base").help("Base commit").conflicts_with("delete"))
+                .arg_from_usage("-d, --delete 'Clear patch series base'"),
+            SubCommand::with_name("checkout")
+                .about("Resume work on a patch series; check out the current version")
+                .arg_from_usage("<name> 'Patch series to check out'"),
+            SubCommand::with_name("commit")
+                .about("Record changes to the patch series")
+                .arg_from_usage("-a, --all 'Commit all changes'")
+                .arg_from_usage("-m [msg] 'Commit message'")
+                .arg_from_usage("-v, --verbose 'Show diff when preparing commit message'"),
+            SubCommand::with_name("cover")
+                .about("Create or edit the cover letter for the patch series")
+                .arg_from_usage("-d, --delete 'Delete cover letter'"),
+            SubCommand::with_name("cp")
+                .about("Copy a patch series")
+                .arg(Arg::with_name("source_dest").required(true).min_values(1).max_values(2).help("source (default: current series) and destination (required)")),
+            SubCommand::with_name("delete")
+                .about("Delete a patch series")
+                .arg_from_usage("<name> 'Patch series to delete'"),
+            SubCommand::with_name("detach")
+                .about("Stop working on any patch series"),
+            SubCommand::with_name("diff")
+                .about("Show changes in the patch series"),
+            SubCommand::with_name("format")
+                .about("Prepare patch series for email")
+                .arg_from_usage("--in-reply-to [Message-Id] 'Make the first mail a reply to the specified Message-Id'")
+                .arg_from_usage("--no-from 'Don't include in-body \"From:\" headers when formatting patches authored by others'")
+                .arg_from_usage("-v, --reroll-count=[N] 'Mark the patch series as PATCH vN'")
+                .arg(Arg::from_usage("--rfc 'Use [RFC PATCH] instead of the standard [PATCH] prefix'").conflicts_with("subject-prefix"))
+                .arg_from_usage("--stdout 'Write patches to stdout rather than files'")
+                .arg_from_usage("--subject-prefix [prefix] 'Use [prefix] instead of the standard [PATCH] prefix'"),
+            SubCommand::with_name("log")
+                .about("Show the history of the patch series")
+                .arg_from_usage("-p, --patch 'Include a patch for each change committed to the series'"),
+            SubCommand::with_name("mv")
+                .about("Move (rename) a patch series")
+                .visible_alias("rename")
+                .arg(Arg::with_name("source_dest").required(true).min_values(1).max_values(2).help("source (default: current series) and destination (required)")),
+            SubCommand::with_name("rebase")
+                .about("Rebase the patch series")
+                .arg_from_usage("[onto] 'Commit to rebase onto'")
+                .arg_from_usage("-i, --interactive 'Interactively edit the list of commits'")
+                .group(ArgGroup::with_name("action").args(&["onto", "interactive"]).multiple(true).required(true)),
+            SubCommand::with_name("req")
+                .about("Generate a mail requesting a pull of the patch series")
+                .visible_aliases(&["pull-request", "request-pull"])
+                .arg_from_usage("-p, --patch 'Include patch in the mail'")
+                .arg_from_usage("<url> 'Repository URL to request pull of'")
+                .arg_from_usage("<tag> 'Tag or branch name to request pull of'"),
+            SubCommand::with_name("status")
+                .about("Show the status of the patch series"),
+            SubCommand::with_name("start")
+                .about("Start a new patch series")
+                .arg_from_usage("<name> 'Patch series name'"),
+            SubCommand::with_name("unadd")
+                .about("Undo \"git series add\", removing changes from the next series commit")
+                .arg_from_usage("<change>... 'Changes to remove (\"series\", \"base\", \"cover\")'"),
+        ]);
+
+    let m = app.get_matches();
 
     let mut out = Output::new();
 

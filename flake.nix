@@ -12,13 +12,14 @@
     flake-utils.lib.eachDefaultSystem (system: let
 
       pkgs = import nixpkgs { inherit system; };
-      craneLib = crane.lib.${system};
+      craneLib = import crane { inherit pkgs; };
 
       package = pkgs.callPackage ./package.nix { inherit craneLib; };
 
     in {
       packages.default = package;
       devShells.default = pkgs.mkShell {
+        packages = [ pkgs.rust-analyzer ];
         inputsFrom = [
           package
         ];

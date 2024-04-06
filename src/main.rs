@@ -15,6 +15,7 @@ use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use git2::{Commit, Config, Delta, Diff, Object, ObjectType, Oid, Reference, Repository, Tree, TreeBuilder};
 #[allow(unused_imports)]
 use log::{trace, debug, info, warn, error};
+use tap::prelude::*;
 use quick_error::quick_error;
 
 quick_error! {
@@ -2192,7 +2193,47 @@ fn req(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+fn push(repo: &Repository, m: &ArgMatches) -> Result<()>
+{
+    let _config = repo.config()?.snapshot()?;
+
+    let shead = repo.find_reference(SHEAD_REF)?;
+    debug!("shead name: {}", String::from_utf8_lossy(shead.name_bytes()));
+    let shead_sym = shead.symbolic_target_bytes()
+        .expect("SHEAD is not a symref?")
+        .pipe(String::from_utf8_lossy)
+        .pipe_deref(str::to_string);
+
+    debug!("shead sym: {}", shead_sym);
+    let shead_commit = shead.resolve()?.peel_to_commit()?;
+    debug!("shead commit: {}", shead_commit.id());
+
+    let git_args = &[
+        "push",
+        m.value_of("remote").unwrap(),
+        &format!("{0}:{0}", shead_sym),
+    ];
+
+    debug!("running git with args {:?}", git_args);
+
+    let git_exit_code = Command::new("git")
+        .args(git_args)
+        .spawn()
+        .expect("Failed to spawn git push process")
+        .wait()
+        .expect("Failed to wait on child git push process")
+        .code()
+        .expect("Failed to get git process exit code (killed by signal?)");
+
+    if git_exit_code != 0 {
+        panic!("git push process exited with non-zero error code {}", git_exit_code);
+    }
+
+    Ok(())
+}
+
 fn main() {
+    env_logger::init();
     let app = App::new("git-series")
         .bin_name("git series")
         .about("Track patch series in git")
@@ -2281,6 +2322,10 @@ fn main() {
         ).subcommand(SubCommand::with_name("unadd")
             .about(r#"Undo "git series add", removing changes from the next series commit"#)
             .arg_from_usage(r#"<change>... 'Changes to remove ("series", "base", "cover")'"#),
+        ).subcommand(SubCommand::with_name("push")
+            .about("Push a git series to a remote, allowing it to be fetched elsewhere")
+            .arg_from_usage(r"#<remote> 'Remote repository to push to'")
+            .arg_from_usage(r"#<series> 'The series name to push'")
         );
 
     let m = app.get_matches();
@@ -2308,6 +2353,7 @@ fn main() {
             ("start", Some(sm)) => start(&repo, sm),
             ("status", Some(sm)) => commit_status(&mut out, &repo, sm, true),
             ("unadd", Some(sm)) => unadd(&repo, sm),
+            ("push", Some(sm)) => push(&repo, &sm),
             _ => unreachable!(),
         }
     }();

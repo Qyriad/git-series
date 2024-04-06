@@ -1,6 +1,9 @@
 {
+  lib,
   stdenv,
   craneLib,
+  darwin,
+  iconv,
   pkg-config,
   openssl,
 }: let
@@ -15,6 +18,9 @@
 
     buildInputs = [
       openssl
+    ] ++ lib.optionals stdenv.hostPlatform.isDarwin [
+      iconv
+      darwin.apple_sdk.frameworks.Security
     ];
   });
 

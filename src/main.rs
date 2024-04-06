@@ -1,16 +1,20 @@
 use std::cmp::max;
+use std::collections::HashSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fmt::Write as FmtWrite;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write as IoWrite;
+use std::path::PathBuf;
 use std::process::Command;
 
 use ansi_term::Style;
 use chrono::offset::TimeZone;
 use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use git2::{Commit, Config, Delta, Diff, Object, ObjectType, Oid, Reference, Repository, Tree, TreeBuilder};
+#[allow(unused_imports)]
+use log::{trace, debug, info, warn, error};
 use quick_error::quick_error;
 
 quick_error! {
@@ -44,7 +48,8 @@ quick_error! {
     }
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type StdResult<T, E> = std::result::Result<T, E>;
+type Result<T> = StdResult<T, Error>;
 
 const COMMIT_MESSAGE_COMMENT: &str = "
 # Please enter the commit message for your changes. Lines starting
@@ -110,7 +115,7 @@ fn commit_summarize(repo: &Repository, id: Oid) -> Result<String> {
     commit_obj_summarize(&mut commit)
 }
 
-fn notfound_to_none<T>(result: std::result::Result<T, git2::Error>) -> Result<Option<T>> {
+fn notfound_to_none<T>(result: StdResult<T, git2::Error>) -> Result<Option<T>> {
     match result {
         Err(ref e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
         Err(e) => Err(e.into()),
@@ -614,13 +619,14 @@ fn get_editor(config: &Config) -> Result<OsString> {
 // Get the pager to use; with for_cmd set, get the pager for use by the
 // specified git command.  If get_pager returns None, don't use a pager.
 fn get_pager(config: &Config, for_cmd: &str, default: bool) -> Option<OsString> {
+    // TODO: should this check stdout or stdin?
     if !atty::is(atty::Stream::Stdout) {
         return None;
     }
     // pager.cmd can contain a boolean (if false, force no pager) or a
     // command-specific pager; only treat it as a command if it doesn't parse
     // as a boolean.
-    let maybe_pager = config.get_path(&format!("pager.{}", for_cmd)).ok();
+    let maybe_pager: Option<PathBuf> = config.get_path(&format!("pager.{}", for_cmd)).ok();
     let (cmd_want_pager, cmd_pager) = maybe_pager.map_or((default, None), |p|
             if let Ok(b) = Config::parse_bool(&p) {
                 (b, None)
@@ -646,13 +652,15 @@ fn get_pager(config: &Config, for_cmd: &str, default: bool) -> Option<OsString> 
 }
 
 /// Construct a Command, using the shell if the command contains shell metachars
-fn cmd_maybe_shell<S: AsRef<OsStr>>(program: S, args: bool) -> Command {
+fn cmd_maybe_shell<S>(program: S, args: bool) -> Command
+where S: AsRef<OsStr>
+{
     if program.as_ref().to_string_lossy().contains(|c| SHELL_METACHARS.contains(c)) {
         let mut cmd = Command::new("sh");
         cmd.arg("-c");
         if args {
             let mut program_with_args = program.as_ref().to_os_string();
-            program_with_args.push(" \"$@\"");
+            program_with_args.push(r#" "$@""#);
             cmd.arg(program_with_args).arg(program);
         } else {
             cmd.arg(program);
@@ -679,9 +687,13 @@ struct Output {
 
 impl Output {
     fn new() -> Self {
-        Output { pager: None, include_stderr: false }
+        Output {
+            pager: None,
+            include_stderr: false,
+        }
     }
 
+    /// Sets self.pager to the std::process::Child, if a pager was spawned.
     fn auto_pager(&mut self, config: &Config, for_cmd: &str, default: bool) -> Result<()> {
         if let Some(pager) = get_pager(config, for_cmd, default) {
             let mut cmd = cmd_maybe_shell(pager, false);
@@ -705,13 +717,8 @@ impl Output {
     // command: the git command to act like.
     // slot: the color "slot" of that git command to act like.
     // default: the color to use if not configured.
-    fn get_color(
-        &self,
-        config: &Config,
-        command: &str,
-        slot: &str,
-        default: &str,
-    ) -> Result<Style> {
+    fn get_color(&self, config: &Config, command: &str, slot: &str, default: &str) -> Result<Style>
+    {
         if !cfg!(unix) {
             return Ok(Style::new());
         }
@@ -1335,7 +1342,8 @@ fn write_diff<W: IoWrite>(
 
 fn get_commits(repo: &Repository, base: Oid, series: Oid) -> Result<Vec<Commit>> {
     let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE);
+    let _ = revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .map_err(|e| error!("revwalk.set_sorting() -> {}", e));
     revwalk.push(series)?;
     revwalk.hide(base)?;
     revwalk.map(|c| {
@@ -1596,7 +1604,8 @@ fn format(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
         .ok_or("Cannot format series; no base set.\nUse \"git series base\" to set base.")?;
 
     let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE);
+    let _ = revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .map_err(|e| error!("revwalk.set_sorting() -> {}", e));
     revwalk.push(series.id())?;
     revwalk.hide(base.id())?;
     let mut commits: Vec<Commit> = revwalk.map(|c| {
@@ -1786,12 +1795,12 @@ fn format(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
 }
 
 fn log(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
-    let config = repo.config()?.snapshot()?;
+    let config: Config = repo.config()?.snapshot()?;
     out.auto_pager(&config, "log", true)?;
     let diffcolors = DiffColors::new(out, &config)?;
 
     let shead_id = repo.refname_to_id(SHEAD_REF)?;
-    let mut hidden_ids = std::collections::HashSet::new();
+    let mut hidden_ids = HashSet::new();
     let mut commit_stack = Vec::new();
     commit_stack.push(shead_id);
     while let Some(oid) = commit_stack.pop() {
@@ -1807,7 +1816,8 @@ fn log(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
     }
 
     let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(git2::Sort::TOPOLOGICAL);
+    let _ = revwalk.set_sorting(git2::Sort::TOPOLOGICAL)
+        .map_err(|e| error!("revwalk.set_sorting() -> {}", e));
     revwalk.push(shead_id)?;
     for id in hidden_ids {
         revwalk.hide(id)?;
@@ -1902,7 +1912,8 @@ fn rebase(repo: &Repository, m: &ArgMatches) -> Result<()> {
     }
 
     let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE);
+    let _ = revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .map_err(|e| error!("revwalk.set_sorting() -> {}", e));
     revwalk.push(series.id())?;
     revwalk.hide(base.id())?;
     let commits: Vec<Commit> = revwalk.map(|c| {
@@ -2101,7 +2112,8 @@ fn req(out: &mut Output, repo: &Repository, m: &ArgMatches) -> Result<()> {
     };
 
     let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE);
+    let _ = revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .map_err(|e| error!("revwalk.set_sorting() -> {}", e));
     revwalk.push(series_id)?;
     revwalk.hide(base.id())?;
     let mut commits: Vec<Commit> = revwalk

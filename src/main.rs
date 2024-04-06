@@ -680,6 +680,7 @@ fn run_editor<S: AsRef<OsStr>>(config: &Config, filename: S) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 struct Output {
     pager: Option<std::process::Child>,
     include_stderr: bool,
@@ -922,12 +923,14 @@ fn commit_status(
             "Changes not staged for commit:",
             &color_changed,
             do_status,
-            &["use \"git series add <file>...\" to update what will be committed"],
+            &[r#"use "git series add <file>..." to update what will be committed"#],
         )?;
 
         if !changes_to_be_committed {
             if changes_not_staged {
-                status.push(color_normal.paint("no changes added to commit (use \"git series add\" or \"git series commit -a\")\n"));
+                status.push(color_normal.paint(
+                    "no changes added to commit (use \"git series add\" or \"git series commit -a\")\n"
+                ));
             } else {
                 status.push(color_normal.paint("nothing to commit; series unchanged\n"));
             }
@@ -948,7 +951,7 @@ fn commit_status(
     let series_id = match tree.get_name("series") {
         None => {
             return Err(concat!(
-                "Cannot commit: initial commit must include \"series\"\n",
+                "Cannot commit: initial commit must include \"series\" entry\n",
                 "Use \"git series add series\" or \"git series commit -a\"",
             ).into());
         }
@@ -1013,6 +1016,7 @@ fn commit_status(
 
     let author = get_signature(&config, "AUTHOR")?;
     let committer = get_signature(&config, "COMMITTER")?;
+
     let mut parents: Vec<Oid> = Vec::new();
     // Include all commits from tree, to keep them reachable and fetchable.
     for e in tree.iter() {
@@ -1020,8 +1024,18 @@ fn commit_status(
             parents.push(e.id())
         }
     }
+
+    let parent_ids: Vec<Oid> = tree
+        .iter()
+        .filter(|entry| entry.kind() == Some(ObjectType::Commit))
+        .filter(|commit| commit.name().unwrap() != "base")
+        .map(|commit| commit.id())
+        .collect();
+
+    assert_eq!(parents, parent_ids);
+
     let parents = parents_from_ids(repo, parents)?;
-    let parents_ref: Vec<&_> = shead_commit.iter().chain(parents.iter()).collect();
+    let parents_ref: Vec<&Commit> = shead_commit.iter().chain(parents.iter()).collect();
     let new_commit_oid = repo.commit(Some(SHEAD_REF), &author, &committer, &msg, &tree, &parents_ref)?;
 
     if commit_all {
@@ -1202,6 +1216,7 @@ fn split_message(message: &str) -> (&str, &str) {
     (subject, body)
 }
 
+#[derive(Debug)]
 struct DiffColors {
     commit: Style,
     meta: Style,
@@ -1555,7 +1570,7 @@ fn write_series_diff<W: IoWrite>(
     let base2 = tree2.and_then(|t| t.get_name("base"));
     let series2 = tree2.and_then(|t| t.get_name("series"));
 
-    if let (Some(base1), Some(series1), Some(base2), Some(series2)) = (base1, series1, base2, series2) {
+    if let (Some(base1), Some(series1), Some(base2), Some(series2)) = (&base1, &series1, &base2, &series2) {
         write_commit_range_diff(
             out,
             repo,
@@ -1565,6 +1580,10 @@ fn write_series_diff<W: IoWrite>(
         )?;
     } else {
         writeln!(out, "Can't diff series: both versions must have base and series to diff")?;
+        warn!(
+            "base1={:?}, series1={:?}, base2={:?}, series2={:?}",
+            base1.is_some(), series1.is_some(), base2.is_some(), series2.is_some(),
+        );
     }
 
     Ok(())
@@ -1574,6 +1593,7 @@ fn mail_signature() -> String {
     format!("-- \ngit-series {}", clap::crate_version!())
 }
 
+/// Appends a space to a non-empty string that doesn't already end in a space.
 fn ensure_space(s: &str) -> &'static str {
     if s.is_empty() || s.ends_with(' ') {
         ""
@@ -1582,6 +1602,7 @@ fn ensure_space(s: &str) -> &'static str {
     }
 }
 
+/// Appends a newline to a string that doesn't already end in one.
 fn ensure_nl(s: &str) -> &'static str {
     if !s.ends_with('\n') {
         "\n"

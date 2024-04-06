@@ -12,6 +12,8 @@
     strictDeps = true;
     inherit stdenv;
 
+    __structuredAttrs = true;
+
     nativeBuildInputs = [
       pkg-config
     ];
@@ -24,12 +26,13 @@
     ];
   });
 
-  deps = mk craneLib.buildDepsOnly { };
+  cargoArtifacts = mk craneLib.buildDepsOnly { };
+
 in mk craneLib.buildPackage {
-  cargoArtifacts = deps;
+  inherit cargoArtifacts;
 
   passthru.clippy = mk craneLib.cargoClippy {
-    cargoArtifacts = deps;
+    inherit cargoArtifacts;
   };
 
   meta.mainProgram = "git-series";
